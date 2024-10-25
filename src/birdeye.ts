@@ -1,6 +1,82 @@
 import { z } from "zod";
 import { uriencode } from "./uriencode";
 
+const networks_zod = z.strictObject({
+  success: z.boolean(),
+  data: z.array(z.string()),
+});
+
+type Networks = z.infer<typeof networks_zod>;
+
+const defi_price_zod = z.strictObject({
+  success: z.boolean(),
+  data: z.strictObject({
+    value: z.number(),
+    updateUnixTime: z.number(),
+    updateHumanTime: z.coerce.date(),
+    liquidity: z.number().optional(),
+  }),
+});
+
+type DefiPrice = z.infer<typeof defi_price_zod>;
+
+const token_list_zod = z.strictObject({
+  success: z.boolean(),
+  message: z.string().optional(),
+  data: z.strictObject({
+    updateUnixTime: z.number(),
+    updateTime: z.coerce.date(),
+    tokens: z.array(
+      z.strictObject({
+        address: z.string(),
+        decimals: z.number(),
+        lastTradeUnixTime: z.number(),
+        liquidity: z.number().optional(),
+        logoURI: z.string(),
+        mc: z.number(),
+        name: z.string().nullable(),
+        symbol: z.string().nullable(),
+        v24hChangePercent: z.number().nullable(),
+        v24hUSD: z.number(),
+      })
+    ),
+    total: z.number(),
+  }),
+});
+
+type TokenList = z.infer<typeof token_list_zod>;
+
+const defi_history_price_zod = z.strictObject({
+  success: z.boolean(),
+  data: z.strictObject({
+    items: z.array(
+      z.strictObject({
+        unixTime: z.number(),
+        value: z.number(),
+      })
+    ),
+  }),
+});
+
+type DefiHistoryPrice = z.infer<typeof defi_history_price_zod>;
+
+const defi_multi_price_zod = z.strictObject({
+  success: z.boolean(),
+  message: z.string().optional(),
+  data: z
+    .strictObject({
+      value: z.number(),
+      updateUnixTime: z.number(),
+      updateHumanTime: z.coerce.date(),
+      liquidity: z.number().optional(),
+    })
+
+    .array()
+    .optional(),
+});
+
+type DefiMultiPrice = z.infer<typeof defi_multi_price_zod>;
+
 /** API for https://docs.birdeye.so/reference
  * For free accounts you can only access the following endpoints:
  * - /defi/networks
@@ -18,22 +94,16 @@ export class Birdeye {
   }
 
   /** Get a list of all supported networks. */
-  public async networks() {
-    const result = await fetch("https://public-api.birdeye.so/defi/networks", {
+  public async networks(): Promise<{
+    success: boolean;
+    data: string[];
+  }> {
+    return await fetch("https://public-api.birdeye.so/defi/networks", {
       method: "GET",
       headers: this.headers,
     })
       .then((res) => res.json())
-      .catch((err) => console.error(err));
-
-    const output = z
-      .strictObject({
-        success: z.boolean(),
-        data: z.array(z.string()),
-      })
-      .parse(result);
-
-    return output;
+      .then((data) => networks_zod.parse(data));
   }
 
   /** Get price update of a token. */
@@ -42,7 +112,15 @@ export class Birdeye {
     chain?: string;
     check_liquidity?: number;
     include_liquidity?: boolean;
-  }) {
+  }): Promise<{
+    success: boolean;
+    data: {
+      value: number;
+      updateUnixTime: number;
+      updateHumanTime: Date;
+      liquidity?: number | undefined;
+    };
+  }> {
     return fetch(
       `https://public-api.birdeye.so/defi/price?${uriencode({
         address: props.address,
@@ -58,20 +136,7 @@ export class Birdeye {
       }
     )
       .then((res) => res.json())
-      .then((data) =>
-        z
-          .strictObject({
-            success: z.boolean(),
-            data: z.strictObject({
-              value: z.number(),
-              updateUnixTime: z.number(),
-              updateHumanTime: z.coerce.date(),
-              liquidity: z.number().optional(),
-            }),
-          })
-          .parse(data)
-      )
-      .catch((err) => console.error(err));
+      .then((data) => defi_price_zod.parse(data));
   }
 
   public async defi_token_list(props?: {
@@ -85,7 +150,27 @@ export class Birdeye {
     min_liquidity?: number;
     /** Defaults to solana */
     chain?: string;
-  }) {
+  }): Promise<{
+    success: boolean;
+    data: {
+      updateUnixTime: number;
+      updateTime: Date;
+      tokens: {
+        symbol: string | null;
+        address: string;
+        decimals: number;
+        lastTradeUnixTime: number;
+        logoURI: string;
+        mc: number;
+        name: string | null;
+        v24hChangePercent: number | null;
+        v24hUSD: number;
+        liquidity?: number | undefined;
+      }[];
+      total: number;
+    };
+    message?: string | undefined;
+  }> {
     return fetch(
       `https://public-api.birdeye.so/defi/tokenlist?${uriencode({
         sort_by: props?.sort_by,
@@ -103,33 +188,8 @@ export class Birdeye {
     )
       .then((res) => res.json())
       .then((data) => {
-        return z
-          .strictObject({
-            success: z.boolean(),
-            message: z.string().optional(),
-            data: z.strictObject({
-              updateUnixTime: z.number(),
-              updateTime: z.coerce.date(),
-              tokens: z.array(
-                z.strictObject({
-                  address: z.string(),
-                  decimals: z.number(),
-                  lastTradeUnixTime: z.number(),
-                  liquidity: z.number().optional(),
-                  logoURI: z.string(),
-                  mc: z.number(),
-                  name: z.string().nullable(),
-                  symbol: z.string().nullable(),
-                  v24hChangePercent: z.number().nullable(),
-                  v24hUSD: z.number(),
-                })
-              ),
-              total: z.number(),
-            }),
-          })
-          .parse(data);
-      })
-      .catch((err) => console.error(err));
+        return token_list_zod.parse(data);
+      });
   }
 
   /** PREMIUM Get historical price line chart of a token. */
@@ -157,7 +217,15 @@ export class Birdeye {
     /** Specify the start time using Unix timestamps in seconds */
     time_to: Date;
     chain?: string;
-  }) {
+  }): Promise<{
+    success: boolean;
+    data: {
+      items: {
+        value: number;
+        unixTime: number;
+      }[];
+    };
+  }> {
     return fetch(
       `https://public-api.birdeye.so/defi/history_price?${uriencode({
         address: props.address,
@@ -186,8 +254,7 @@ export class Birdeye {
             }),
           })
           .parse(data)
-      )
-      .catch((err) => console.error(err));
+      );
   }
 
   /** PREMIUM Get price updates of multiple tokens in a single API call. Maximum 100 tokens */
@@ -196,7 +263,18 @@ export class Birdeye {
     chain?: string;
     check_liquidity?: number;
     include_liquidity?: boolean;
-  }) {
+  }): Promise<{
+    success: boolean;
+    message?: string | undefined;
+    data?:
+      | {
+          value: number;
+          updateUnixTime: number;
+          updateHumanTime: Date;
+          liquidity?: number | undefined;
+        }[]
+      | undefined;
+  }> {
     return fetch(
       `https://public-api.birdeye.so/defi/multi_price?${uriencode({
         list_address: props.list_address.join(","),
@@ -213,24 +291,7 @@ export class Birdeye {
     )
       .then((res) => res.json())
       .then((data) => {
-        console.log(data);
-        return z
-          .strictObject({
-            success: z.boolean(),
-            message: z.string().optional(),
-            data: z
-              .strictObject({
-                value: z.number(),
-                updateUnixTime: z.number(),
-                updateHumanTime: z.coerce.date(),
-                liquidity: z.number().optional(),
-              })
-
-              .array()
-              .optional(),
-          })
-          .parse(data);
-      })
-      .catch((err) => console.error(err));
+        return defi_multi_price_zod.parse(data);
+      });
   }
 }
